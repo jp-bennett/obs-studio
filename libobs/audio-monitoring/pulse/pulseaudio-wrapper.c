@@ -266,6 +266,51 @@ int_fast32_t pulseaudio_get_source_info(pa_source_info_cb_t cb,
 
 	return 0;
 }
+int_fast32_t pulseaudio_get_sink_info_list(pa_sink_info_cb_t cb,
+					     void *userdata)
+{
+	if (pulseaudio_context_ready() < 0)
+		return -1;
+
+	pulseaudio_lock();
+
+	pa_operation *op = pa_context_get_sink_info_list(pulseaudio_context,
+							   cb, userdata);
+	if (!op) {
+		pulseaudio_unlock();
+		return -1;
+	}
+	while (pa_operation_get_state(op) == PA_OPERATION_RUNNING)
+		pulseaudio_wait();
+	pa_operation_unref(op);
+
+	pulseaudio_unlock();
+
+	return 0;
+}
+
+int_fast32_t pulseaudio_get_sink_info(pa_sink_info_cb_t cb,
+					const char *name, void *userdata)
+{
+	if (pulseaudio_context_ready() < 0)
+		return -1;
+
+	pulseaudio_lock();
+
+	pa_operation *op = pa_context_get_sink_info_by_name(
+		pulseaudio_context, name, cb, userdata);
+	if (!op) {
+		pulseaudio_unlock();
+		return -1;
+	}
+	while (pa_operation_get_state(op) == PA_OPERATION_RUNNING)
+		pulseaudio_wait();
+	pa_operation_unref(op);
+
+	pulseaudio_unlock();
+
+	return 0;
+}
 
 int_fast32_t pulseaudio_get_server_info(pa_server_info_cb_t cb, void *userdata)
 {
@@ -312,7 +357,7 @@ int_fast32_t pulseaudio_connect_playback(pa_stream *s, const char *name,
 	if (pulseaudio_context_ready() < 0)
 		return -1;
 
-	size_t dev_len = strlen(name) - 8;
+	size_t dev_len = strlen(name);
 	char *device = bzalloc(dev_len + 1);
 	memcpy(device, name, dev_len);
 
