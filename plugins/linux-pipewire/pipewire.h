@@ -43,7 +43,11 @@ struct obs_pipewire_connect_stream_info {
 
 obs_pipewire *obs_pipewire_connect_fd(int pipewire_fd, const struct pw_registry_events *registry_events,
 				      void *user_data);
+/* Connects directly to the PipeWire daemon instead of going through a portal */
+obs_pipewire *obs_pipewire_connect(const struct pw_registry_events *registry_events, void *user_data);
 struct pw_registry *obs_pipewire_get_registry(obs_pipewire *obs_pw);
+struct pw_core *obs_pipewire_get_core(obs_pipewire *obs_pw);
+struct pw_thread_loop *obs_pipewire_get_thread_loop(obs_pipewire *obs_pw);
 void obs_pipewire_roundtrip(obs_pipewire *obs_pw);
 void obs_pipewire_destroy(obs_pipewire *obs_pw);
 

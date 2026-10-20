@@ -1132,10 +1132,18 @@ obs_pipewire *obs_pipewire_connect_fd(int pipewire_fd, const struct pw_registry_
 	pw_thread_loop_lock(obs_pw->thread_loop);
 
 	/* Core */
-	obs_pw->core = pw_context_connect_fd(obs_pw->context, fcntl(obs_pw->pipewire_fd, F_DUPFD_CLOEXEC, 5), NULL, 0);
+	if (pipewire_fd >= 0)
+		obs_pw->core =
+			pw_context_connect_fd(obs_pw->context, fcntl(obs_pw->pipewire_fd, F_DUPFD_CLOEXEC, 5), NULL, 0);
+	else
+		obs_pw->core = pw_context_connect(obs_pw->context, NULL, 0);
+
 	if (!obs_pw->core) {
 		blog(LOG_WARNING, "Error creating PipeWire core: %m");
 		pw_thread_loop_unlock(obs_pw->thread_loop);
+		pw_thread_loop_stop(obs_pw->thread_loop);
+		g_clear_pointer(&obs_pw->context, pw_context_destroy);
+		g_clear_pointer(&obs_pw->thread_loop, pw_thread_loop_destroy);
 		bfree(obs_pw);
 		return NULL;
 	}
@@ -1163,6 +1171,21 @@ obs_pipewire *obs_pipewire_connect_fd(int pipewire_fd, const struct pw_registry_
 struct pw_registry *obs_pipewire_get_registry(obs_pipewire *obs_pw)
 {
 	return obs_pw->registry;
+}
+
+obs_pipewire *obs_pipewire_connect(const struct pw_registry_events *registry_events, void *user_data)
+{
+	return obs_pipewire_connect_fd(-1, registry_events, user_data);
+}
+
+struct pw_core *obs_pipewire_get_core(obs_pipewire *obs_pw)
+{
+	return obs_pw->core;
+}
+
+struct pw_thread_loop *obs_pipewire_get_thread_loop(obs_pipewire *obs_pw)
+{
+	return obs_pw->thread_loop;
 }
 
 void obs_pipewire_roundtrip(obs_pipewire *obs_pw)

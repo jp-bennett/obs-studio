@@ -20,6 +20,13 @@ else()
   set(_HAS_PIPEWIRE_CAMERA FALSE)
 endif()
 
+if(PipeWire_VERSION VERSION_GREATER_EQUAL 0.3.34)
+  target_enable_feature(linux-pipewire "PipeWire 0.3.34+ virtual camera support")
+  set(_HAS_PIPEWIRE_VIRTUALCAM TRUE)
+else()
+  set(_HAS_PIPEWIRE_VIRTUALCAM FALSE)
+endif()
+
 target_sources(
   linux-pipewire
   PRIVATE
@@ -34,6 +41,8 @@ target_sources(
     portal.h
     screencast-portal.c
     screencast-portal.h
+    $<$<BOOL:${_HAS_PIPEWIRE_VIRTUALCAM}>:virtualcam.c>
+    $<$<BOOL:${_HAS_PIPEWIRE_VIRTUALCAM}>:virtualcam.h>
 )
 
 target_include_directories(linux-pipewire PRIVATE ${libdrm_include_directories})
