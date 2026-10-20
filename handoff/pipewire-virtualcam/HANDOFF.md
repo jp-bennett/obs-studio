@@ -95,14 +95,13 @@ Chrome and Firefox both use libwebrtc's
     `gst-launch-1.0 pipewiresrc target-object=obs_virtual_camera ! video/x-raw,format=YUY2,width=640,height=360 ! ...`
     Without a caps filter, `pipewiresrc` connects with no format and
     WirePlumber reports "target not found". That's GStreamer, not the node.
-- **The UI was not run in the container.** Master needs Qt newer than
-  Ubuntu 24.04's 6.4, plus FFmpeg 8 and MbedTLS 3, so only libobs and the
-  plugins were built there. See "UI compile status" below.
+- **The UI was compiled but not run in the container.** See "UI compile
+  status" at the end.
 
 ## Build on Fedora
 
-Master currently requires FFmpeg >= 8.0, MbedTLS 3.x, Qt 6 (recent;
-master uses APIs such as `QCheckBox::checkStateChanged` from Qt 6.7), and
+Master currently requires FFmpeg >= 8.0, MbedTLS 3.x, Qt >= 6.9 (the
+plugin manager uses `QString::arg(std::string_view)`), and
 PipeWire >= 0.3.34. Check what the Fedora release provides; RPM Fusion
 has newer FFmpeg if Fedora's `ffmpeg-free` is too old.
 
@@ -227,4 +226,22 @@ versions listed and displayed the camera.
 
 ## UI compile status (filled in by the cloud session)
 
-UPDATE-ME
+The frontend was compiled with `-Werror` against Qt 6.8.3 built from
+source. These compile cleanly, along with every other frontend file that
+includes `VCamConfig.hpp`:
+- `OBSBasicVCamConfig.cpp`
+- `BasicOutputHandler.cpp`
+- `OBSBasic.cpp`
+- `OBSBasic_VirtualCam.cpp`
+- `OBSStudioAPI.cpp`
+
+That pass found and fixed one bug, in the commit "frontend: Fix virtual
+camera dialog build".
+
+The `obs` binary could not be linked there, because two unrelated
+upstream files need more than that Qt build had:
+- `InstalledPluginRow.cpp` needs Qt >= 6.9.
+- `OBSApp.cpp` needs Qt's Wayland support.
+
+So the UI flow (button, gear dialog, backend dropdown) still needs its
+first real run on the laptop.
