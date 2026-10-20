@@ -89,6 +89,8 @@ struct BasicOutputHandler {
 	virtual void Update() = 0;
 	virtual void SetupOutputs() = 0;
 
+	void CreateVirtualCam();
+	void RecreateVirtualCam();
 	virtual void UpdateVirtualCamOutputSource();
 	virtual void DestroyVirtualCamView();
 	virtual void DestroyVirtualCameraScene();

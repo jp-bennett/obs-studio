@@ -223,14 +223,7 @@ const char *GetStreamOutputType(const obs_service_t *service)
 
 BasicOutputHandler::BasicOutputHandler(OBSBasic *main_) : main(main_)
 {
-	if (main->vcamEnabled) {
-		virtualCam = obs_output_create(VIRTUAL_CAM_ID, "virtualcam_output", nullptr, nullptr);
-
-		signal_handler_t *signal = obs_output_get_signal_handler(virtualCam);
-		startVirtualCam.Connect(signal, "start", OBSStartVirtualCam, this);
-		stopVirtualCam.Connect(signal, "stop", OBSStopVirtualCam, this);
-		deactivateVirtualCam.Connect(signal, "deactivate", OBSDeactivateVirtualCam, this);
-	}
+	CreateVirtualCam();
 
 	auto service = main_->GetService();
 	OBSDataAutoRelease settings = obs_service_get_settings(service);
@@ -245,6 +238,42 @@ BasicOutputHandler::BasicOutputHandler(OBSBasic *main_) : main(main_)
 	if (config_get_int(main->Config(), "Stream1", "WHIPSimulcastTotalLayers") > 1) {
 		whipSimulcastEncoders = make_unique<WHIPSimulcastEncoders>();
 	}
+}
+
+void BasicOutputHandler::CreateVirtualCam()
+{
+	if (!main->vcamEnabled) {
+		return;
+	}
+
+	startVirtualCam.Disconnect();
+	stopVirtualCam.Disconnect();
+	deactivateVirtualCam.Disconnect();
+
+	/* Release the previous output first so that two outputs never share the name */
+	virtualCam = nullptr;
+	virtualCam = obs_output_create(main->vcamConfig.outputId.c_str(), "virtualcam_output", nullptr, nullptr);
+	if (!virtualCam) {
+		return;
+	}
+
+	signal_handler_t *signal = obs_output_get_signal_handler(virtualCam);
+	startVirtualCam.Connect(signal, "start", OBSStartVirtualCam, this);
+	stopVirtualCam.Connect(signal, "stop", OBSStopVirtualCam, this);
+	deactivateVirtualCam.Connect(signal, "deactivate", OBSDeactivateVirtualCam, this);
+}
+
+void BasicOutputHandler::RecreateVirtualCam()
+{
+	if (!main->vcamEnabled || VirtualCamActive()) {
+		return;
+	}
+
+	if (virtualCam && main->vcamConfig.outputId == obs_output_get_id(virtualCam)) {
+		return;
+	}
+
+	CreateVirtualCam();
 }
 
 extern void log_vcam_changed(const VCamConfig &config, bool starting);

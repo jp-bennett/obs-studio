@@ -1633,6 +1633,9 @@ private:
 	VCamConfig vcamConfig;
 	bool restartingVCam = false;
 
+	std::string GetVirtualCamOutputId();
+	void SetVirtualCamOutputId(const std::string &id);
+
 public slots:
 	void StartVirtualCam();
 	void StopVirtualCam();

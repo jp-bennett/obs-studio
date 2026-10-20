@@ -22,6 +22,8 @@
 #include <components/UIValidation.hpp>
 #include <dialogs/OBSBasicVCamConfig.hpp>
 
+#include <algorithm>
+
 #define VIRTUAL_CAM_START "==== Virtual Camera Start =========================================="
 #define VIRTUAL_CAM_STOP "==== Virtual Camera Stop ==========================================="
 
@@ -148,10 +150,37 @@ void log_vcam_changed(const VCamConfig &config, bool starting)
 	}
 }
 
+std::string OBSBasic::GetVirtualCamOutputId()
+{
+	std::vector<std::string> ids = GetAvailableVirtualCamOutputIds();
+	if (ids.empty()) {
+		return {};
+	}
+
+	const char *saved = config_get_string(App()->GetUserConfig(), "VirtualCam", "OutputId");
+	if (saved && std::find(ids.begin(), ids.end(), saved) != ids.end()) {
+		return saved;
+	}
+
+	return ids.front();
+}
+
+void OBSBasic::SetVirtualCamOutputId(const std::string &id)
+{
+	if (id.empty() || id == vcamConfig.outputId) {
+		return;
+	}
+
+	blog(LOG_INFO, "Virtual Camera output changed to '%s'", id.c_str());
+	config_set_string(App()->GetUserConfig(), "VirtualCam", "OutputId", id.c_str());
+}
+
 void OBSBasic::UpdateVirtualCamConfig(const VCamConfig &config)
 {
+	SetVirtualCamOutputId(config.outputId);
 	vcamConfig = config;
 
+	outputHandler->RecreateVirtualCam();
 	outputHandler->UpdateVirtualCamOutputSource();
 	log_vcam_changed(config, false);
 }
@@ -162,6 +191,7 @@ void OBSBasic::RestartVirtualCam(const VCamConfig &config)
 
 	StopVirtualCam();
 
+	SetVirtualCamOutputId(config.outputId);
 	vcamConfig = config;
 }
 
@@ -171,6 +201,7 @@ void OBSBasic::RestartingVirtualCam()
 		return;
 	}
 
+	outputHandler->RecreateVirtualCam();
 	outputHandler->UpdateVirtualCamOutputSource();
 	StartVirtualCam();
 	restartingVCam = false;

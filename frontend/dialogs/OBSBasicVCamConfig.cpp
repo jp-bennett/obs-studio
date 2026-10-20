@@ -4,16 +4,42 @@
 
 #include "moc_OBSBasicVCamConfig.cpp"
 
+static QString GetVirtualCamOutputName(const std::string &id)
+{
+	if (id == PIPEWIRE_VIRTUAL_CAM_ID) {
+		return QTStr("Basic.VCam.Backend.PipeWire");
+	}
+#if !defined(_WIN32) && !defined(__APPLE__)
+	if (id == VIRTUAL_CAM_ID) {
+		return QTStr("Basic.VCam.Backend.V4L2");
+	}
+#endif
+
+	const char *name = obs_output_get_display_name(id.c_str());
+	return QT_UTF8(name ? name : id.c_str());
+}
+
 OBSBasicVCamConfig::OBSBasicVCamConfig(const VCamConfig &_config, bool _vcamActive, QWidget *parent)
 	: config(_config),
 	  vcamActive(_vcamActive),
 	  activeType(_config.type),
+	  activeOutputId(_config.outputId),
 	  QDialog(parent),
 	  ui(new Ui::OBSBasicVCamConfig)
 {
 	setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
 
 	ui->setupUi(this);
+
+	/* Only offer a choice when several virtual camera outputs are installed */
+	std::vector<std::string> outputIds = GetAvailableVirtualCamOutputIds();
+	for (const std::string &id : outputIds) {
+		ui->outputId->addItem(GetVirtualCamOutputName(id), QString::fromStdString(id));
+	}
+	ui->outputId->setCurrentIndex(std::max(ui->outputId->findData(QString::fromStdString(config.outputId)), 0));
+	ui->outputIdLabel->setVisible(outputIds.size() > 1);
+	ui->outputId->setVisible(outputIds.size() > 1);
+	connect(ui->outputId, &QComboBox::currentIndexChanged, this, &OBSBasicVCamConfig::UpdateRestartWarning);
 
 	ui->outputType->addItem(QTStr("Basic.VCam.OutputType.Program"), (int)VCamOutputType::ProgramView);
 	ui->outputType->addItem(QTStr("StudioMode.Preview"), (int)VCamOutputType::PreviewOutput);
@@ -91,12 +117,21 @@ void OBSBasicVCamConfig::OutputTypeChanged()
 	}
 	}
 
+	UpdateRestartWarning();
+}
+
+void OBSBasicVCamConfig::UpdateRestartWarning()
+{
 	if (!vcamActive) {
 		return;
 	}
 
+	VCamOutputType type = (VCamOutputType)ui->outputType->currentData().toInt();
+	std::string outputId = ui->outputId->currentData().toString().toStdString();
+
 	requireRestart = (activeType == VCamOutputType::ProgramView && type != VCamOutputType::ProgramView) ||
-			 (activeType != VCamOutputType::ProgramView && type == VCamOutputType::ProgramView);
+			 (activeType != VCamOutputType::ProgramView && type == VCamOutputType::ProgramView) ||
+			 (!outputId.empty() && outputId != activeOutputId);
 
 	ui->warningLabel->setVisible(requireRestart);
 }
@@ -120,6 +155,11 @@ void OBSBasicVCamConfig::UpdateConfig()
 	}
 
 	config.type = type;
+
+	std::string outputId = ui->outputId->currentData().toString().toStdString();
+	if (!outputId.empty()) {
+		config.outputId = outputId;
+	}
 
 	if (requireRestart) {
 		emit AcceptedAndRestart(config);
