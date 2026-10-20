@@ -16,7 +16,7 @@ static QString GetVirtualCamOutputName(const std::string &id)
 #endif
 
 	const char *name = obs_output_get_display_name(id.c_str());
-	return QT_UTF8(name ? name : id.c_str());
+	return QString::fromUtf8(name ? name : id.c_str());
 }
 
 OBSBasicVCamConfig::OBSBasicVCamConfig(const VCamConfig &_config, bool _vcamActive, QWidget *parent)
