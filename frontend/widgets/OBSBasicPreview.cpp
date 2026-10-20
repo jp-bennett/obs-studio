@@ -3,7 +3,12 @@
 #include <utility/display-helpers.hpp>
 #include <widgets/OBSBasic.hpp>
 
+#include <algorithm>
+#include <cmath>
+
 #include "moc_OBSBasicPreview.cpp"
+
+static bool GetItemViewState(obs_sceneitem_t *item, ItemViewState &st);
 
 #define HANDLE_RADIUS 4.0f
 #define HANDLE_SEL_RADIUS (HANDLE_RADIUS * 1.5f)
@@ -597,6 +602,45 @@ void OBSBasicPreview::keyReleaseEvent(QKeyEvent *event)
 
 void OBSBasicPreview::wheelEvent(QWheelEvent *event)
 {
+	if (!locked && !scrollMode && (event->modifiers() & Qt::AltModifier)) {
+		/* Qt may report Alt+wheel as horizontal scrolling */
+		QPoint angle = event->angleDelta();
+		int delta = angle.y() != 0 ? angle.y() : angle.x();
+
+		if (delta != 0) {
+			OBSBasic *main = OBSBasic::Get();
+			float pixelRatio = main->GetDevicePixelRatio();
+			float scale = pixelRatio / main->previewScale;
+			QPointF qtPos = event->position();
+			vec2 pos;
+			vec2_set(&pos, (float(qtPos.x()) - main->previewX / pixelRatio) * scale,
+				 (float(qtPos.y()) - main->previewY / pixelRatio) * scale);
+
+			OBSScene scene = main->GetCurrentScene();
+			OBSDataAutoRelease before = obs_scene_save_transform_states(scene, true);
+
+			float factor = powf(1.1f, float(delta) / 120.0f);
+			if (ZoomItemAt(pos, factor)) {
+				OBSDataAutoRelease after = obs_scene_save_transform_states(scene, true);
+
+				auto undo_redo = [](const std::string &data) {
+					OBSDataAutoRelease dat = obs_data_create_from_json(data.c_str());
+					OBSSourceAutoRelease source =
+						obs_get_source_by_uuid(obs_data_get_string(dat, "scene_uuid"));
+					OBSBasic::Get()->SetCurrentScene(source.Get(), true);
+					obs_scene_load_transform_states(data.c_str());
+				};
+
+				main->undo_s.add_action(
+					QTStr("Undo.Transform.Zoom").arg(obs_source_get_name(main->GetCurrentSceneSource())),
+					undo_redo, undo_redo, obs_data_get_json(before), obs_data_get_json(after), true);
+			}
+		}
+
+		event->accept();
+		return;
+	}
+
 	if (scrollMode && IsFixedScaling()) {
 		const int delta = event->angleDelta().y();
 		if (delta != 0) {
@@ -679,6 +723,17 @@ void OBSBasicPreview::mousePressEvent(QMouseEvent *event)
 
 	mouseOverItems = SelectedAtPos(startPos);
 	vec2_zero(&lastMoveOffset);
+
+	/* Alt+drag inside a source (not on a handle) pans its content */
+	panning = false;
+	panItem = nullptr;
+	if (altDown && event->button() == Qt::LeftButton && stretchHandle == ItemHandle::None) {
+		OBSSceneItem item = GetPanZoomItemAtPos(startPos);
+		if (item && GetItemViewState(item, panStart)) {
+			panItem = item;
+			panning = true;
+		}
+	}
 
 	mousePos = startPos;
 	wrapper = obs_scene_save_transform_states(main->GetCurrentScene(), true);
@@ -847,6 +902,8 @@ void OBSBasicPreview::mouseReleaseEvent(QMouseEvent *event)
 
 		stretchItem = nullptr;
 		stretchGroup = nullptr;
+		panItem = nullptr;
+		panning = false;
 		mouseDown = false;
 		mouseMoved = false;
 		cropping = false;
@@ -1713,6 +1770,298 @@ void OBSBasicPreview::RotateItem(const vec2 &pos)
 	obs_sceneitem_set_pos(stretchItem, &pos3);
 }
 
+/* -------------------------------------------------------------------------
+ * Alt+drag pan and Alt+wheel zoom inside an item's box.
+ *
+ * Both work by changing the item's crop, so the box keeps its place and size
+ * on the canvas. For items without a bounding box the scale is adjusted to
+ * keep the box size; items with a bounding box are refit by libobs.
+ * ---------------------------------------------------------------------- */
+
+struct PanFindData {
+	const vec2 &pos;
+	OBSSceneItem top;
+	OBSSceneItem topSelected;
+
+	explicit PanFindData(const vec2 &pos_) : pos(pos_) {}
+};
+
+static bool FindPanZoomItem(obs_scene_t * /* scene */, obs_sceneitem_t *item, void *param)
+{
+	PanFindData *data = static_cast<PanFindData *>(param);
+
+	if (!SceneItemHasVideo(item) || obs_sceneitem_locked(item) || !obs_sceneitem_visible(item)) {
+		return true;
+	}
+
+	matrix4 transform, invTransform;
+	obs_sceneitem_get_box_transform(item, &transform);
+	matrix4_inv(&invTransform, &transform);
+
+	vec3 pos3, unit;
+	vec3_set(&pos3, data->pos.x, data->pos.y, 0.0f);
+	vec3_transform(&unit, &pos3, &invTransform);
+
+	if (unit.x >= 0.0f && unit.x <= 1.0f && unit.y >= 0.0f && unit.y <= 1.0f) {
+		data->top = item;
+		if (obs_sceneitem_selected(item)) {
+			data->topSelected = item;
+		}
+	}
+
+	return true;
+}
+
+OBSSceneItem OBSBasicPreview::GetPanZoomItemAtPos(const vec2 &pos)
+{
+	OBSScene scene = OBSBasic::Get()->GetCurrentScene();
+	if (!scene) {
+		return OBSSceneItem();
+	}
+
+	PanFindData data(pos);
+	obs_scene_enum_items(scene, FindPanZoomItem, &data);
+
+	OBSSceneItem item = data.topSelected ? data.topSelected : data.top;
+	if (item && obs_sceneitem_is_group(item)) {
+		return OBSSceneItem();
+	}
+	return item;
+}
+
+static float AlignFrac(uint32_t align, uint32_t low, uint32_t high)
+{
+	if (align & low) {
+		return 0.0f;
+	}
+	if (align & high) {
+		return 1.0f;
+	}
+	return 0.5f;
+}
+
+static bool IsFitBounds(obs_bounds_type type)
+{
+	return type == OBS_BOUNDS_SCALE_INNER || type == OBS_BOUNDS_MAX_ONLY;
+}
+
+static bool GetItemViewState(obs_sceneitem_t *item, ItemViewState &st)
+{
+	obs_source_t *source = obs_sceneitem_get_source(item);
+	const float srcW = float(obs_source_get_width(source));
+	const float srcH = float(obs_source_get_height(source));
+	if (srcW <= 0.0f || srcH <= 0.0f) {
+		return false;
+	}
+
+	obs_sceneitem_crop crop;
+	obs_sceneitem_get_crop(item, &crop);
+
+	vec2 win;
+	vec2_set(&win, srcW - float(crop.left + crop.right), srcH - float(crop.top + crop.bottom));
+	if (win.x < 1.0f || win.y < 1.0f) {
+		return false;
+	}
+
+	vec2 scale;
+	obs_sceneitem_get_scale(item, &scale);
+
+	vec2_set(&st.srcSize, srcW, srcH);
+	vec2_set(&st.scaleSign, scale.x < 0.0f ? -1.0f : 1.0f, scale.y < 0.0f ? -1.0f : 1.0f);
+	vec2_set(&st.visPos, float(crop.left), float(crop.top));
+	st.visSize = win;
+	st.boundsType = obs_sceneitem_get_bounds_type(item);
+
+	if (st.boundsType == OBS_BOUNDS_NONE) {
+		vec2_set(&st.k, fabsf(scale.x), fabsf(scale.y));
+		if (st.k.x <= 0.0f || st.k.y <= 0.0f) {
+			return false;
+		}
+		vec2_mul(&st.box, &win, &st.k);
+		/* The box transform already follows flips for unbounded items */
+		vec2_set(&st.flip, 1.0f, 1.0f);
+		vec2_zero(&st.alignFrac);
+	} else {
+		obs_sceneitem_get_bounds(item, &st.box);
+		if (st.box.x < 1.0f || st.box.y < 1.0f) {
+			return false;
+		}
+
+		vec2 fit;
+		vec2_set(&fit, st.box.x / win.x, st.box.y / win.y);
+
+		float kk;
+		switch (st.boundsType) {
+		case OBS_BOUNDS_STRETCH:
+			st.k = fit;
+			kk = 0.0f;
+			break;
+		case OBS_BOUNDS_SCALE_OUTER:
+			kk = std::max(fit.x, fit.y);
+			break;
+		case OBS_BOUNDS_SCALE_TO_WIDTH:
+			kk = fit.x;
+			break;
+		case OBS_BOUNDS_SCALE_TO_HEIGHT:
+			kk = fit.y;
+			break;
+		case OBS_BOUNDS_MAX_ONLY:
+			kk = std::min(1.0f, std::min(fit.x, fit.y));
+			break;
+		case OBS_BOUNDS_SCALE_INNER:
+		default:
+			kk = std::min(fit.x, fit.y);
+			break;
+		}
+		if (st.boundsType != OBS_BOUNDS_STRETCH) {
+			vec2_set(&st.k, kk, kk);
+		}
+
+		/* The bounding box is not flipped, the content inside it is */
+		st.flip = st.scaleSign;
+
+		uint32_t align = obs_sceneitem_get_bounds_alignment(item);
+		st.alignFrac.x = AlignFrac(align, OBS_ALIGN_LEFT, OBS_ALIGN_RIGHT);
+		st.alignFrac.y = AlignFrac(align, OBS_ALIGN_TOP, OBS_ALIGN_BOTTOM);
+		if (st.flip.x < 0.0f) {
+			st.alignFrac.x = 1.0f - st.alignFrac.x;
+		}
+		if (st.flip.y < 0.0f) {
+			st.alignFrac.y = 1.0f - st.alignFrac.y;
+		}
+
+		/* Content wider or taller than the box is cut by the box (or will
+		 * be once we set the crop), so only that part counts as visible. */
+		for (int i = 0; i < 2; i++) {
+			float visible = st.box.ptr[i] / st.k.ptr[i];
+			float excess = st.visSize.ptr[i] - visible;
+			if (excess > 0.0f) {
+				st.visPos.ptr[i] += excess * st.alignFrac.ptr[i];
+				st.visSize.ptr[i] = visible;
+			}
+		}
+	}
+
+	matrix4 boxTransform;
+	obs_sceneitem_get_box_transform(item, &boxTransform);
+	matrix4_inv(&st.invBox, &boxTransform);
+	return true;
+}
+
+static void ApplyItemView(obs_sceneitem_t *item, const ItemViewState &st, const vec2 &visPos, const vec2 &visSize,
+			  bool zooming)
+{
+	int pos[2], size[2], far[2];
+	for (int i = 0; i < 2; i++) {
+		int src = int(std::lround(st.srcSize.ptr[i]));
+		size[i] = std::clamp(int(std::lround(visSize.ptr[i])), 1, src);
+		pos[i] = std::clamp(int(std::lround(visPos.ptr[i])), 0, src - size[i]);
+		far[i] = src - pos[i] - size[i];
+	}
+
+	obs_sceneitem_crop crop;
+	crop.left = pos[0];
+	crop.top = pos[1];
+	crop.right = far[0];
+	crop.bottom = far[1];
+
+	obs_sceneitem_defer_update_begin(item);
+	obs_sceneitem_set_crop(item, &crop);
+
+	if (st.boundsType == OBS_BOUNDS_NONE) {
+		/* Keep the box size exact; the rounding error goes into the scale */
+		vec2 scale;
+		vec2_set(&scale, st.scaleSign.x * st.box.x / float(size[0]), st.scaleSign.y * st.box.y / float(size[1]));
+		obs_sceneitem_set_scale(item, &scale);
+	} else if (zooming && st.boundsType == OBS_BOUNDS_MAX_ONLY) {
+		/* "Only when larger" can't scale up, so zooming needs a fit box */
+		obs_sceneitem_set_bounds_type(item, OBS_BOUNDS_SCALE_INNER);
+	}
+
+	obs_sceneitem_defer_update_end(item);
+}
+
+static vec2 CanvasToUnit(const ItemViewState &st, const vec2 &pos)
+{
+	vec3 pos3, unit;
+	vec3_set(&pos3, pos.x, pos.y, 0.0f);
+	vec3_transform(&unit, &pos3, &st.invBox);
+
+	vec2 result;
+	vec2_set(&result, unit.x, unit.y);
+	return result;
+}
+
+void OBSBasicPreview::PanItem(const vec2 &pos)
+{
+	if (!panItem || obs_sceneitem_locked(panItem)) {
+		return;
+	}
+
+	const ItemViewState &st = panStart;
+	vec2 u0 = CanvasToUnit(st, startPos);
+	vec2 u1 = CanvasToUnit(st, pos);
+
+	vec2 visPos;
+	for (int i = 0; i < 2; i++) {
+		/* Content follows the mouse, so the visible window moves the
+		 * other way */
+		float srcDelta = (u1.ptr[i] - u0.ptr[i]) * st.box.ptr[i] / st.k.ptr[i] * st.flip.ptr[i];
+		float maxPos = std::max(0.0f, st.srcSize.ptr[i] - st.visSize.ptr[i]);
+		visPos.ptr[i] = std::clamp(st.visPos.ptr[i] - srcDelta, 0.0f, maxPos);
+	}
+
+	ApplyItemView(panItem, st, visPos, st.visSize, false);
+}
+
+bool OBSBasicPreview::ZoomItemAt(const vec2 &pos, float factor)
+{
+	OBSSceneItem item = GetPanZoomItemAtPos(pos);
+	ItemViewState st;
+	if (!item || !GetItemViewState(item, st)) {
+		return false;
+	}
+
+	const bool fit = IsFitBounds(st.boundsType);
+
+	/* Zoom out until the source fills the box (or, for "fit" boxes, until
+	 * the whole source shows); zoom in until about 8 source pixels show.
+	 * Never force a zoom the user didn't ask for. */
+	float ratio[2], minVisible[2];
+	for (int i = 0; i < 2; i++) {
+		ratio[i] = st.box.ptr[i] / (st.srcSize.ptr[i] * st.k.ptr[i]);
+		minVisible[i] = st.box.ptr[i] / (8.0f * st.k.ptr[i]);
+	}
+	float fMin = std::min(1.0f, fit ? std::min(ratio[0], ratio[1]) : std::max(ratio[0], ratio[1]));
+	float fMax = std::max(1.0f, std::min(minVisible[0], minVisible[1]));
+	factor = std::clamp(factor, fMin, fMax);
+	if (fabsf(factor - 1.0f) < 0.0001f) {
+		return false;
+	}
+
+	vec2 u = CanvasToUnit(st, pos);
+
+	vec2 visPos, visSize;
+	for (int i = 0; i < 2; i++) {
+		float box = st.box.ptr[i];
+		float k = st.k.ptr[i];
+		float k2 = k * factor;
+		float uSrc = st.flip.ptr[i] < 0.0f ? 1.0f - u.ptr[i] : u.ptr[i];
+
+		/* Source point under the cursor stays under the cursor */
+		float pad = std::max(0.0f, box - st.visSize.ptr[i] * k) * st.alignFrac.ptr[i];
+		float anchor = st.visPos.ptr[i] + (uSrc * box - pad) / k;
+
+		visSize.ptr[i] = std::min(box / k2, st.srcSize.ptr[i]);
+		float pad2 = std::max(0.0f, box - visSize.ptr[i] * k2) * st.alignFrac.ptr[i];
+		float maxPos = std::max(0.0f, st.srcSize.ptr[i] - visSize.ptr[i]);
+		visPos.ptr[i] = std::clamp(anchor - (uSrc * box - pad2) / k2, 0.0f, maxPos);
+	}
+
+	ApplyItemView(item, st, visPos, visSize, true);
+	return true;
+}
+
 void OBSBasicPreview::mouseMoveEvent(QMouseEvent *event)
 {
 	OBSBasic *main = OBSBasic::Get();
@@ -1739,6 +2088,18 @@ void OBSBasicPreview::mouseMoveEvent(QMouseEvent *event)
 
 	if (mouseDown) {
 		vec2 pos = GetMouseEventPos(event);
+
+		if (panning) {
+			if (cursor().shape() != Qt::ClosedHandCursor) {
+				setCursor(Qt::ClosedHandCursor);
+			}
+			snapGuides.clear();
+			selectionBox = false;
+			PanItem(pos);
+			mouseMoved = true;
+			mousePos = pos;
+			return;
+		}
 
 		if (!mouseMoved && !mouseOverItems && stretchHandle == ItemHandle::None) {
 			ProcessClick(startPos);

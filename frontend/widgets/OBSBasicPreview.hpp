@@ -31,6 +31,22 @@ enum class ItemHandle : uint32_t {
 	Rot = ITEM_ROT
 };
 
+/* What part of a source an item shows and how it is scaled, used for
+ * Alt+drag panning and Alt+wheel zooming inside the item's box. Sizes are
+ * in source pixels unless noted. */
+struct ItemViewState {
+	vec2 srcSize;
+	vec2 box;   /* item box on the canvas, in canvas pixels */
+	vec2 k;     /* canvas pixels per source pixel */
+	vec2 visPos;
+	vec2 visSize;
+	vec2 flip;  /* -1 where a bounded item is flipped on that axis */
+	vec2 alignFrac;
+	vec2 scaleSign;
+	matrix4 invBox;
+	enum obs_bounds_type boundsType;
+};
+
 struct SnapGuide {
 	vec2 start;
 	vec2 end;
@@ -62,6 +78,10 @@ private:
 	matrix4 screenToItem;
 	matrix4 itemToScreen;
 	matrix4 invGroupTransform;
+
+	bool panning = false;
+	OBSSceneItem panItem;
+	ItemViewState panStart;
 
 	gs_texture_t *overflow = nullptr;
 	gs_vertbuffer_t *rectFill = nullptr;
@@ -120,6 +140,9 @@ private:
 	void CropItem(const vec2 &pos);
 	void StretchItem(const vec2 &pos);
 	void RotateItem(const vec2 &pos);
+	void PanItem(const vec2 &pos);
+	bool ZoomItemAt(const vec2 &pos, float factor);
+	static OBSSceneItem GetPanZoomItemAtPos(const vec2 &pos);
 
 	static void SnapItemMovement(vec2 &offset);
 	void MoveItems(const vec2 &pos);
