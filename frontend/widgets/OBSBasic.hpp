@@ -237,6 +237,18 @@ class OBSBasic : public OBSMainWindow {
 		Horizontal,
 	};
 
+	enum class ScreenRegion {
+		LeftHalf,
+		RightHalf,
+		LeftThird,
+		MiddleThird,
+		RightThird,
+		TopLeftQuarter,
+		TopRightQuarter,
+		BottomLeftQuarter,
+		BottomRightQuarter,
+	};
+
 	/* -------------------------------------
 	 * MARK: - General
 	 * -------------------------------------
@@ -1183,6 +1195,7 @@ private:
 	// TODO: Move back to transitions
 	QMenu *CreateVisibilityTransitionMenu(bool visible);
 	void CenterSelectedSceneItems(const CenterType &centerType);
+	void FitSelectedSceneItemsToRegion(ScreenRegion region);
 
 	/* OBS Callbacks */
 	static void SourceCreated(void *data, calldata_t *params);
@@ -1214,6 +1227,15 @@ private slots:
 	void on_actionCenterToScreen_triggered();
 	void on_actionVerticalCenter_triggered();
 	void on_actionHorizontalCenter_triggered();
+	void on_actionFitToLeftHalf_triggered();
+	void on_actionFitToRightHalf_triggered();
+	void on_actionFitToLeftThird_triggered();
+	void on_actionFitToMiddleThird_triggered();
+	void on_actionFitToRightThird_triggered();
+	void on_actionFitToTopLeftQuarter_triggered();
+	void on_actionFitToTopRightQuarter_triggered();
+	void on_actionFitToBottomLeftQuarter_triggered();
+	void on_actionFitToBottomRightQuarter_triggered();
 
 	void on_actionEditTransform_triggered();
 

@@ -1974,6 +1974,15 @@ void OBSBasic::UpdateEditMenu()
 	ui->actionCenterToScreen->setEnabled(canTransformMultiple);
 	ui->actionVerticalCenter->setEnabled(canTransformMultiple);
 	ui->actionHorizontalCenter->setEnabled(canTransformMultiple);
+	ui->actionFitToLeftHalf->setEnabled(canTransformMultiple);
+	ui->actionFitToRightHalf->setEnabled(canTransformMultiple);
+	ui->actionFitToLeftThird->setEnabled(canTransformMultiple);
+	ui->actionFitToMiddleThird->setEnabled(canTransformMultiple);
+	ui->actionFitToRightThird->setEnabled(canTransformMultiple);
+	ui->actionFitToTopLeftQuarter->setEnabled(canTransformMultiple);
+	ui->actionFitToTopRightQuarter->setEnabled(canTransformMultiple);
+	ui->actionFitToBottomLeftQuarter->setEnabled(canTransformMultiple);
+	ui->actionFitToBottomRightQuarter->setEnabled(canTransformMultiple);
 }
 
 void OBSBasic::UpdateTitleBar()

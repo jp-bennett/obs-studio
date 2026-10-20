@@ -1278,6 +1278,161 @@ void OBSBasic::on_actionStretchToScreen_triggered()
 			  undo_redo, undo_redo, undo_data, redo_data);
 }
 
+struct FitRegionParams {
+	vec2 pos;
+	vec2 size;
+	obs_bounds_type boundsType;
+	uint32_t boundsAlign;
+	bool forceCrop;
+};
+
+static bool FitSelectedItemsToRegion(obs_scene_t * /* scene */, obs_sceneitem_t *item, void *param)
+{
+	const FitRegionParams &region = *static_cast<FitRegionParams *>(param);
+
+	if (obs_sceneitem_is_group(item)) {
+		obs_sceneitem_group_enum_items(item, FitSelectedItemsToRegion, param);
+	}
+	if (!obs_sceneitem_selected(item)) {
+		return true;
+	}
+	if (obs_sceneitem_locked(item)) {
+		return true;
+	}
+
+	obs_transform_info itemInfo;
+	vec2_copy(&itemInfo.pos, &region.pos);
+	vec2_set(&itemInfo.scale, 1.0f, 1.0f);
+	itemInfo.alignment = OBS_ALIGN_LEFT | OBS_ALIGN_TOP;
+	itemInfo.rot = 0.0f;
+
+	vec2_copy(&itemInfo.bounds, &region.size);
+	itemInfo.bounds_type = region.boundsType;
+	itemInfo.bounds_alignment = region.boundsAlign;
+	itemInfo.crop_to_bounds = region.forceCrop || obs_sceneitem_get_bounds_crop(item);
+
+	obs_sceneitem_set_info2(item, &itemInfo);
+
+	return true;
+}
+
+void OBSBasic::FitSelectedSceneItemsToRegion(ScreenRegion region)
+{
+	obs_video_info ovi;
+	obs_get_video_info(&ovi);
+
+	const float w = float(ovi.base_width);
+	const float h = float(ovi.base_height);
+
+	FitRegionParams params;
+
+	/* Halves and thirds keep the source at full canvas height and crop
+	 * whatever is wider than the column equally from both sides. */
+	auto column = [&](float left, float width) {
+		vec2_set(&params.pos, left, 0.0f);
+		vec2_set(&params.size, width, h);
+		params.boundsType = OBS_BOUNDS_SCALE_TO_HEIGHT;
+		params.boundsAlign = OBS_ALIGN_CENTER;
+		params.forceCrop = true;
+	};
+
+	/* Corners fit the source inside a quarter of the canvas (half width,
+	 * half height), like "Fit to screen", pushed into that corner. */
+	auto corner = [&](bool right, bool bottom) {
+		vec2_set(&params.pos, right ? w / 2.0f : 0.0f, bottom ? h / 2.0f : 0.0f);
+		vec2_set(&params.size, w / 2.0f, h / 2.0f);
+		params.boundsType = OBS_BOUNDS_SCALE_INNER;
+		params.boundsAlign = (right ? OBS_ALIGN_RIGHT : OBS_ALIGN_LEFT) |
+				     (bottom ? OBS_ALIGN_BOTTOM : OBS_ALIGN_TOP);
+		params.forceCrop = false;
+	};
+
+	switch (region) {
+	case ScreenRegion::LeftHalf:
+		column(0.0f, w / 2.0f);
+		break;
+	case ScreenRegion::RightHalf:
+		column(w / 2.0f, w / 2.0f);
+		break;
+	case ScreenRegion::LeftThird:
+		column(0.0f, w / 3.0f);
+		break;
+	case ScreenRegion::MiddleThird:
+		column(w / 3.0f, w / 3.0f);
+		break;
+	case ScreenRegion::RightThird:
+		column(w * 2.0f / 3.0f, w / 3.0f);
+		break;
+	case ScreenRegion::TopLeftQuarter:
+		corner(false, false);
+		break;
+	case ScreenRegion::TopRightQuarter:
+		corner(true, false);
+		break;
+	case ScreenRegion::BottomLeftQuarter:
+		corner(false, true);
+		break;
+	case ScreenRegion::BottomRightQuarter:
+		corner(true, true);
+		break;
+	}
+
+	OBSDataAutoRelease wrapper = obs_scene_save_transform_states(GetCurrentScene(), false);
+	obs_scene_enum_items(GetCurrentScene(), FitSelectedItemsToRegion, &params);
+	OBSDataAutoRelease rwrapper = obs_scene_save_transform_states(GetCurrentScene(), false);
+
+	std::string undo_data(obs_data_get_json(wrapper));
+	std::string redo_data(obs_data_get_json(rwrapper));
+	undo_s.add_action(
+		QTStr("Undo.Transform.FitToRegion").arg(obs_source_get_name(obs_scene_get_source(GetCurrentScene()))),
+		undo_redo, undo_redo, undo_data, redo_data);
+}
+
+void OBSBasic::on_actionFitToLeftHalf_triggered()
+{
+	FitSelectedSceneItemsToRegion(ScreenRegion::LeftHalf);
+}
+
+void OBSBasic::on_actionFitToRightHalf_triggered()
+{
+	FitSelectedSceneItemsToRegion(ScreenRegion::RightHalf);
+}
+
+void OBSBasic::on_actionFitToLeftThird_triggered()
+{
+	FitSelectedSceneItemsToRegion(ScreenRegion::LeftThird);
+}
+
+void OBSBasic::on_actionFitToMiddleThird_triggered()
+{
+	FitSelectedSceneItemsToRegion(ScreenRegion::MiddleThird);
+}
+
+void OBSBasic::on_actionFitToRightThird_triggered()
+{
+	FitSelectedSceneItemsToRegion(ScreenRegion::RightThird);
+}
+
+void OBSBasic::on_actionFitToTopLeftQuarter_triggered()
+{
+	FitSelectedSceneItemsToRegion(ScreenRegion::TopLeftQuarter);
+}
+
+void OBSBasic::on_actionFitToTopRightQuarter_triggered()
+{
+	FitSelectedSceneItemsToRegion(ScreenRegion::TopRightQuarter);
+}
+
+void OBSBasic::on_actionFitToBottomLeftQuarter_triggered()
+{
+	FitSelectedSceneItemsToRegion(ScreenRegion::BottomLeftQuarter);
+}
+
+void OBSBasic::on_actionFitToBottomRightQuarter_triggered()
+{
+	FitSelectedSceneItemsToRegion(ScreenRegion::BottomRightQuarter);
+}
+
 void OBSBasic::CenterSelectedSceneItems(const CenterType &centerType)
 {
 	QModelIndexList selectedItems = GetAllSelectedSourceItems();

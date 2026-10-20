@@ -792,6 +792,18 @@
      <addaction name="actionCenterToScreen"/>
      <addaction name="actionVerticalCenter"/>
      <addaction name="actionHorizontalCenter"/>
+     <addaction name="separator"/>
+     <addaction name="actionFitToLeftHalf"/>
+     <addaction name="actionFitToRightHalf"/>
+     <addaction name="separator"/>
+     <addaction name="actionFitToLeftThird"/>
+     <addaction name="actionFitToMiddleThird"/>
+     <addaction name="actionFitToRightThird"/>
+     <addaction name="separator"/>
+     <addaction name="actionFitToTopLeftQuarter"/>
+     <addaction name="actionFitToTopRightQuarter"/>
+     <addaction name="actionFitToBottomLeftQuarter"/>
+     <addaction name="actionFitToBottomRightQuarter"/>
     </widget>
     <widget class="QMenu" name="orderMenu">
      <property name="title">
@@ -1775,6 +1787,51 @@
    </property>
    <property name="shortcut">
     <string>Ctrl+R</string>
+   </property>
+  </action>
+  <action name="actionFitToLeftHalf">
+   <property name="text">
+    <string>Basic.MainMenu.Edit.Transform.FitToLeftHalf</string>
+   </property>
+  </action>
+  <action name="actionFitToRightHalf">
+   <property name="text">
+    <string>Basic.MainMenu.Edit.Transform.FitToRightHalf</string>
+   </property>
+  </action>
+  <action name="actionFitToLeftThird">
+   <property name="text">
+    <string>Basic.MainMenu.Edit.Transform.FitToLeftThird</string>
+   </property>
+  </action>
+  <action name="actionFitToMiddleThird">
+   <property name="text">
+    <string>Basic.MainMenu.Edit.Transform.FitToMiddleThird</string>
+   </property>
+  </action>
+  <action name="actionFitToRightThird">
+   <property name="text">
+    <string>Basic.MainMenu.Edit.Transform.FitToRightThird</string>
+   </property>
+  </action>
+  <action name="actionFitToTopLeftQuarter">
+   <property name="text">
+    <string>Basic.MainMenu.Edit.Transform.FitToTopLeftQuarter</string>
+   </property>
+  </action>
+  <action name="actionFitToTopRightQuarter">
+   <property name="text">
+    <string>Basic.MainMenu.Edit.Transform.FitToTopRightQuarter</string>
+   </property>
+  </action>
+  <action name="actionFitToBottomLeftQuarter">
+   <property name="text">
+    <string>Basic.MainMenu.Edit.Transform.FitToBottomLeftQuarter</string>
+   </property>
+  </action>
+  <action name="actionFitToBottomRightQuarter">
+   <property name="text">
+    <string>Basic.MainMenu.Edit.Transform.FitToBottomRightQuarter</string>
    </property>
   </action>
   <action name="actionCenterToScreen">
